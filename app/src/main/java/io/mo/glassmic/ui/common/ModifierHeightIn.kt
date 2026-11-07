@@ -8,4 +8,4 @@ import androidx.compose.ui.unit.Dp
 internal fun Modifier.heightIn(
     min: Dp = Dp.Unspecified,
     max: Dp = Dp.Unspecified
-): Modifier = foundationHeightIn(minHeight = min, maxHeight = max)
+): Modifier = foundationHeightIn(min, max)

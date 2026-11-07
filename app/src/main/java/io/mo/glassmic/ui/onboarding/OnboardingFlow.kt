@@ -265,8 +265,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.PermissionsPage(
 
 private fun launchGrantIntent(activity: Activity, key: PermKey) {
     val pkgUri = android.net.Uri.parse("package:${activity.packageName}")
-    // 麦克风是运行时权限，直接弹系统授权框；引导页没有注册 ActivityResultLauncher，
-    // 结果由 ON_RESUME 重新检测 + PermissionChecker.mic 兜住，不影响流程继续。
+    // Mic is requested as a runtime permission; retain the explicit enum case below for exhaustiveness.
     if (key == PermKey.Mic) {
         runCatching {
             androidx.core.app.ActivityCompat.requestPermissions(
@@ -281,6 +280,7 @@ private fun launchGrantIntent(activity: Activity, key: PermKey) {
             .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
         PermKey.Overlay -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkgUri)
         PermKey.File, PermKey.Fgs -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(pkgUri)
+        PermKey.Mic -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(pkgUri)
         PermKey.Safe -> Intent(Settings.ACTION_SETTINGS)
     }
     runCatching { activity.startActivity(intent) }

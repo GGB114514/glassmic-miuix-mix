@@ -67,7 +67,11 @@ data class GlassTokens(
     val radiusChip: Dp = 10.dp,
     /** 列表项左内缩：HyperOS 分组列表的分隔线与文字都从这里对齐。 */
     val listInset: Dp = 16.dp,
-)
+) {
+    /** Backward-compatible aliases used by existing UI call sites. */
+    val chipRadius: Dp get() = radiusChip
+    val errInk: Color get() = err
+}
 
 val GlassPrimary = Color(0xFF3D7AFF)
 
@@ -134,7 +138,7 @@ fun glassTokens(dark: Boolean, glass: Boolean): GlassTokens {
         barSolid = if (dark) Color(0xFF141416) else Color(0xFFF7F7F7),
     )
     if (glass) return base
-    // 关闭「卡片透明」：完全不透明实色卡片 + 纯色背景，即 MiuiX 的标准观感
+    // 关闭「卡片透明」：完全不透明实色卡片 + 纯色背��，即 MiuiX 的标准观感
     val solid = if (dark) Color(0xFF1E1E22) else Color.White
     return base.copy(
         bgBase = if (dark) Color(0xFF0F0F11) else Color(0xFFF2F2F7),
