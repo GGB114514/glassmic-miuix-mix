@@ -7,8 +7,9 @@ import androidx.datastore.dataStoreFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.mo.glassmic.core.Constants
 import io.mo.glassmic.core.model.ConfigSnapshot
-import io.mo.glassmic.data.runtime.LsposedServiceManager
+import io.mo.glassmic.core.model.MixEngine
 import io.mo.glassmic.core.model.ScopeMode as ScopeModeCore
+import io.mo.glassmic.data.runtime.LsposedServiceManager
 import io.mo.glassmic.proto.AppConfig
 import io.mo.glassmic.proto.ScopeMode
 import kotlinx.coroutines.CoroutineScope
@@ -61,7 +62,7 @@ class ConfigStore @Inject constructor(
 
     private fun syncToXShared(cfg: AppConfig) {
         // 关键：使用 Context.MODE_WORLD_READABLE 让 Xposed 进程能读取
-        // Android 8.0+ 默认禁用，需在 application 标签下加 android:sharedUserId 或使用 LSPosed 的 XSharedPreferences
+        // Android 8.0+ 默认禁用，需在 application 标签加 android:sharedUserId 或使用 LSPosed 的 XSharedPreferences
         // LSPosed 现代版本支持直接读取 App 的 SharedPreferences，无需 WORLD_READABLE
         @Suppress("DEPRECATION", "WorldReadableFiles")
         val prefs = try {
