@@ -7,7 +7,7 @@ import androidx.compose.ui.unit.Dp
 /** Applies a minimum height using the layout's Density scope. */
 internal fun Modifier.heightIn(min: Dp): Modifier = this.then(
     Modifier.layout { measurable, constraints ->
-        val minHeightPx = with(this) { min.roundToPx() }.coerceAtMost(constraints.maxHeight)
+        val minHeightPx = min.roundToPx().coerceAtMost(constraints.maxHeight)
         val placeable = measurable.measure(
             constraints.copy(minHeight = maxOf(constraints.minHeight, minHeightPx))
         )
