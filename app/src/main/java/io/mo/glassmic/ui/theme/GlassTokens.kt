@@ -67,7 +67,11 @@ data class GlassTokens(
     val radiusChip: Dp = 10.dp,
     /** 列表项左内缩：HyperOS 分组列表的分隔线与文字都从这里对齐。 */
     val listInset: Dp = 16.dp,
-)
+) {
+    /** 兼容旧命名：部分组件仍按 chipRadius / errInk 调用。 */
+    val chipRadius: Dp get() = radiusChip
+    val errInk: Color get() = err
+}
 
 val GlassPrimary = Color(0xFF3D7AFF)
 
