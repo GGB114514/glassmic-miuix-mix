@@ -281,6 +281,8 @@ private fun launchGrantIntent(activity: Activity, key: PermKey) {
             .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
         PermKey.Overlay -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkgUri)
         PermKey.File, PermKey.Fgs -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(pkgUri)
+        // 上方已通过运行时权限请求处理；这里作为穷尽分支的安全兜底。
+        PermKey.Mic -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(pkgUri)
         PermKey.Safe -> Intent(Settings.ACTION_SETTINGS)
     }
     runCatching { activity.startActivity(intent) }
