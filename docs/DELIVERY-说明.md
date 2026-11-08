@@ -136,3 +136,26 @@ settingsEvaluated {
 ---
 
 内容由 AI 生成
+
+---
+
+## 七、第二轮改动（2026-11-08，悬浮窗五项需求）
+
+基线换成你在 GitHub 上修好的分支 `fix/kotlin-compile-errors-…`（Actions 构建成功的那版），
+不再从云端未验证版本继续。
+
+| 需求 | 落点 | 关键取舍 |
+|---|---|---|
+| 1 展开/收起动画 + 横屏尺寸 | `FloatingBubbleUi.kt` | `shownMode` 让渲染形态比 `mode` 慢一拍，否则退场动画播不出来；**横屏调不回来的根因**是 `resizeBy` 把尺寸按当前屏幕钳住后回写了意图，现在意图只受 `PANEL_INTENT_MAX` 绝对上限约束，屏幕尺寸仅影响渲染，档位与紧凑判定也改用意图高度 |
+| 2 悬浮窗麦克风按钮 | 收起按钮左侧 | 行为在「设置 → 麦克风混音 → 悬浮窗麦克风按钮」里二选一：开关混音 / 切换真实麦克风。图标用 Mic↔MicOff 表达状态 |
+| 3 音乐注入按钮 | 麦克风按钮右侧 | 新增 `music_inject`（optional，未设置=开启，老用户零影响），在 `EffectiveSourceResolver` 里作为独立闸门，与播放/暂停彻底解耦 |
+| 4 选曲置顶展开 | `LibraryTab` | 点一首歌 → 置顶并就地展开播放键/进度条/时长/播放策略，取代原「播放设置」折叠按钮；当前项不再重复可点，避免打断播放进度 |
+| 5 混音不可用 | `AudioRecordHook.kt` + `MicCaptureMixer.kt` | 两个真问题：HOOK_SIDE 混音块原先排在 `SILENCE` 分支之后，而暂停态 `src` 正是 SILENCE，等于暂停时混音永不生效；APP_SIDE 在 Android 10+ 并发录音限制下常见「状态正常但全是静音」，现在依次试 4 种采集源 + 全零采样看门狗，识别后 `RuntimeProvider` 自动改由目标进程借用已授权会话，两侧互斥不会叠两遍 |
+
+顺带调整：混音不再被 `RECORD_AUDIO` 硬卡（HOOK_SIDE 本就不需要本应用持有麦克风），授权降级为可选邀请，提示色由 err 改 warn。
+
+合并说明：main 与 fix 分支各自独立修过同一批编译错误，已逐处取舍——`ModifierHeightIn.kt` 补丁删除，
+改为在 `GlassKit.kt` 补上缺失的 `import androidx.compose.foundation.layout.heightIn`（根因）；
+`MicMixMode` / `MixEngine` 两个 typealias 保留，两侧都经 Actions 验证过。
+
+验证：合并后 run 42447609723 全部步骤 success，含 `AudioRegression` 与 `TapTimingRegression` 回归检查。
