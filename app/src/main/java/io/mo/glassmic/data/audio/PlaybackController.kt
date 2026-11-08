@@ -350,9 +350,9 @@ class PlaybackController @Inject constructor(
             }
 
             MicMixMode.MIX -> {
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                    != PackageManager.PERMISSION_GRANTED
-                ) return@withContext false
+                // 不再把 RECORD_AUDIO 当硬门槛：应用侧采集拿不到声音时会自动改走 HOOK_SIDE，
+                // 而 HOOK_SIDE 借用目标应用已授权的录音会话，本来就不需要本应用持有麦克风。
+                // 授权入口仍然留在设置与引导页——它决定的是能不能用 APP_SIDE，不是能不能混音。
                 configStore.update { it.setMicMix(it.micMix.toBuilder().setEnabled(true).build()) }
                 // 混音也要有注入流作载体：没有曲子时混音无从叠加
                 if (runtime.value.currentSourceType == SourceType.REAL_MIC) restorePersistedClip()
@@ -368,6 +368,49 @@ class PlaybackController @Inject constructor(
             runtime.value.currentSourceType == SourceType.REAL_MIC && !cfg.micMix.enabled -> MicMixMode.MIC_ONLY
             cfg.micMix.enabled -> MicMixMode.MIX
             else -> MicMixMode.MUSIC_ONLY
+        }
+    }
+
+    /**
+     * 音乐注入总开关（与播放/暂停解耦）。
+     *
+     * 关掉之后目标应用拿到的是真实麦克风——即便面板里仍显示已选曲目、即便处于播放态。
+     * 这正是把「导入音乐」与「播放」拆开的原因：不播放音乐时麦克风照常可用。
+     */
+    suspend fun setMusicInjectEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        configStore.update { it.setMusicInject(enabled) }
+        GlassLog.b("Playback") { if (enabled) "音乐注入开启" else "音乐注入关闭，麦克风交还真人" }
+    }
+
+    /** @return 切换后的新状态，供悬浮窗按钮决定图标高亮。 */
+    suspend fun toggleMusicInject(): Boolean = withContext(Dispatchers.IO) {
+        val cfg = configStore.current()
+        val next = !(if (cfg.hasMusicInject()) cfg.musicInject else true)
+        setMusicInjectEnabled(next)
+        next
+    }
+
+    /**
+     * 悬浮窗麦克风按钮：开 / 关混音。
+     *
+     * 不再把权限当硬门槛——APP_SIDE 没授权或拿不到声音时会自动改走 HOOK_SIDE，
+     * 后者借用目标应用已授权的录音会话，本来就不需要 GlassMic 自己持有麦克风。
+     */
+    suspend fun toggleMixFromFloat(): Boolean = withContext(Dispatchers.IO) {
+        val next = !configStore.current().micMix.enabled
+        configStore.update { it.setMicMix(it.micMix.toBuilder().setEnabled(next).build()) }
+        if (next && runtime.value.currentSourceType == SourceType.REAL_MIC) restorePersistedClip()
+        next
+    }
+
+    /** 悬浮窗麦克风按钮的另一语义：在「完全放行真实麦克风」与「恢复当前音源」之间切换。 */
+    suspend fun toggleRealMicFromFloat(): Boolean = withContext(Dispatchers.IO) {
+        if (runtime.value.currentSourceType == SourceType.REAL_MIC) {
+            // true = 现在恢复注入（麦克风被音乐接管）
+            restorePersistedClip()
+        } else {
+            setRealMic()
+            false
         }
     }
 

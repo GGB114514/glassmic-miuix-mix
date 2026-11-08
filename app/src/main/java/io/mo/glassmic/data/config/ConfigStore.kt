@@ -7,6 +7,7 @@ import androidx.datastore.dataStoreFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.mo.glassmic.core.Constants
 import io.mo.glassmic.core.model.ConfigSnapshot
+import io.mo.glassmic.core.model.MixButtonAction
 import io.mo.glassmic.core.model.MixEngine
 import io.mo.glassmic.core.model.ScopeMode as ScopeModeCore
 import io.mo.glassmic.data.runtime.LsposedServiceManager
@@ -85,6 +86,8 @@ class ConfigStore @Inject constructor(
             putFloat("mix_music_gain", cfg.micMix.musicGain.takeIf { it > 0f } ?: 1f)
             putFloat("mix_mic_gain", cfg.micMix.micGain.takeIf { it > 0f } ?: 1f)
             putBoolean("mix_ducking", cfg.micMix.ducking)
+            putBoolean("music_inject", !cfg.hasMusicInject() || cfg.musicInject)
+            putString("mix_button_action", cfg.micMix.buttonAction.name)
         }.apply()
     }
     /**
@@ -139,7 +142,13 @@ private fun AppConfig.toSnapshot(): ConfigSnapshot = ConfigSnapshot(
     },
     musicGain = micMix.musicGain.takeIf { it > 0f } ?: 1f,
     micGain = micMix.micGain.takeIf { it > 0f } ?: 1f,
-    mixDucking = micMix.ducking
+    mixDucking = micMix.ducking,
+    // optional 字段：未设置按「开启」处理，保证老用户升级后行为完全不变
+    musicInjectEnabled = !hasMusicInject() || musicInject,
+    mixButtonAction = when (micMix.buttonAction) {
+        io.mo.glassmic.proto.MixButtonAction.TOGGLE_REAL_MIC -> MixButtonAction.TOGGLE_REAL_MIC
+        else -> MixButtonAction.TOGGLE_MIX
+    }
 )
 
 /** AudioPolicy 选中的目标应用；兼容旧版单选字段 `audio_policy_package`。 */

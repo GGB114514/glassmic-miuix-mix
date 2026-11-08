@@ -39,6 +39,8 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Tune
@@ -99,6 +101,7 @@ import io.mo.glassmic.ui.common.Segmented
 import io.mo.glassmic.ui.common.glass
 import io.mo.glassmic.ui.common.liquidClickable
 import io.mo.glassmic.ui.theme.LocalReduceMotion
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
@@ -182,6 +185,12 @@ fun FloatingBubbleRoot(
     onToggleFishEnhance: (Boolean) -> Unit = {},
     ttsProgressLines: List<String> = emptyList(),
     ttsEnhanced: TtsProgress.Enhanced? = null,
+    /** 悬浮窗麦克风按钮的高亮态——语义由设置里的 button_action 决定。 */
+    micButtonActive: Boolean = false,
+    onMicButton: () -> Unit = {},
+    /** 音乐注入开关：与播放/暂停解耦，关掉即把麦克风还给真人。 */
+    musicInjectEnabled: Boolean = true,
+    onMusicInjectButton: () -> Unit = {},
 ) {
     // 面板尺寸：拖动中实时变化，松手后经 onResizePanel 存进配置。
     // 对象只创建一次——拖动手势在 pointerInput(Unit) 里常驻，若配置一变就换新对象，
@@ -196,6 +205,30 @@ fun FloatingBubbleRoot(
         onResizePanel(panelSize.width?.value?.roundToInt() ?: 0, panelSize.height?.value?.roundToInt() ?: 0)
     }
     val resetSize = { onResizePanel(0, 0) }
+
+    // 展开 / 收起动画。
+    //
+    // 若 mode 一变就立刻换成球态，Compose 会当场卸掉面板那棵树，退场动画根本没机会播。
+    // 所以让「实际渲染的形态」比 mode 慢一拍：收起时先把 appear 归零，等动画放完再换成球。
+    val reduceMotion = LocalReduceMotion.current
+    var shownMode by remember { mutableStateOf(mode) }
+    val appear by animateFloatAsState(
+        targetValue = if (mode == FloatMode.BALL) 0f else 1f,
+        animationSpec = if (reduceMotion) snap() else tween(PANEL_ANIM_MS, easing = FastOutSlowInEasing),
+        label = "panelAppear"
+    )
+    LaunchedEffect(mode) {
+        if (mode != FloatMode.BALL) {
+            shownMode = mode
+        } else if (reduceMotion) {
+            shownMode = FloatMode.BALL
+        } else {
+            delay(PANEL_ANIM_MS.toLong())
+            shownMode = FloatMode.BALL
+        }
+    }
+    // 降低动画时按 1 处理：既不做缩放也不做淡入，避免"看起来卡了一下"
+    val appearSafe = if (reduceMotion) 1f else appear
 
     // 精简 / 最小档的播放控制：有正在播的音源（文件或 TTS）就暂停 / 继续；
     // 否则若文字转语音已生成好，点一下开始播放
@@ -227,11 +260,12 @@ fun FloatingBubbleRoot(
     var browsingGroupId by remember { mutableStateOf<String?>(null) }
 
     CompositionLocalProvider(LocalContentColor provides glass.ink) {
-        when (mode) {
+        when (shownMode) {
             FloatMode.BALL -> Ball(
                 sizeDp = sizeDp,
                 iconPath = iconPath,
                 opacity = opacity,
+                appear = appearSafe,
                 streaming = isStreaming && !paused,
                 onTap = onBallTap,
                 onDragBy = onDragBy,
@@ -239,14 +273,17 @@ fun FloatingBubbleRoot(
             )
 
             FloatMode.MINI_BAR, FloatMode.MENU, FloatMode.TTS -> {
-                val tab = if (mode == FloatMode.TTS) PanelTab.TTS else PanelTab.LIBRARY
-                val availableHeight = minOf(panelSize.height ?: panelMaxHeight, panelMaxHeight - PANEL_SHADOW_MARGIN * 2)
+                val tab = if (shownMode == FloatMode.TTS) PanelTab.TTS else PanelTab.LIBRARY
+                // 紧凑与否只看**用户设定的高度（意图）**，不看被横屏压过之后的可用高度。
+                // 否则一转横屏就永久掉进紧凑档、音量行被藏掉，怎么拖都没法把音乐调回来。
+                val intendedHeight = panelSize.height ?: panelMaxHeight
                 val compactLibrary = tab == PanelTab.LIBRARY &&
-                    availableHeight < LIBRARY_COMPACT_HEIGHT * LocalDensity.current.fontScale
+                    intendedHeight < LIBRARY_COMPACT_HEIGHT * LocalDensity.current.fontScale
                 PanelShell(
                     maxWidth = panelMaxWidth,
                     maxHeight = if (tab == PanelTab.TTS) Dp.Infinity else panelMaxHeight,
                     panel = panelSize,
+                    appear = appearSafe,
                     scrollable = tab == PanelTab.TTS,
                     dense = compactLibrary,
                     onResizeEnd = saveSize,
@@ -276,6 +313,24 @@ fun FloatingBubbleRoot(
                             CircleIconButton(Icons.Rounded.Tune, stringResource(R.string.float_settings), onOpenTtsSettings)
                             Spacer(Modifier.width(10.dp))
                         }
+                        // 麦克风按钮：干什么由用户在设置里选（开关混音 / 切换真实麦克风）。
+                        // 挨着收起放，是因为这两枚都是"改变我对目标应用说了什么"的开关。
+                        CircleIconButton(
+                            icon = if (micButtonActive) Icons.Rounded.Mic else Icons.Rounded.MicOff,
+                            desc = stringResource(R.string.float_mic_button),
+                            active = micButtonActive,
+                            onClick = onMicButton
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        // 音乐注入按钮：与播放键解耦。关掉之后即使面板里还选着曲子、
+                        // 即使处于播放态，目标应用拿到的也是真实麦克风。
+                        CircleIconButton(
+                            icon = Icons.Rounded.MusicNote,
+                            desc = stringResource(R.string.float_music_inject_button),
+                            active = musicInjectEnabled,
+                            onClick = onMusicInjectButton
+                        )
+                        Spacer(Modifier.width(10.dp))
                         CollapsePill(onCollapse)
                     }
                 ) {
@@ -348,6 +403,7 @@ fun FloatingBubbleRoot(
                 maxWidth = panelMaxWidth,
                 maxHeight = Dp.Infinity,
                 panel = panelSize,
+                appear = appearSafe,
                 scrollable = false,
                 onResizeEnd = saveSize,
                 onResetSize = resetSize,
@@ -407,6 +463,15 @@ private class PanelSize(width: Dp?, height: Dp?) {
 /** 能缩到的绝对最小尺寸：只剩一个播放键。 */
 private val PANEL_MIN_WIDTH = 72.dp
 private val PANEL_MIN_HEIGHT = 72.dp
+/**
+ * 意图尺寸的绝对上限——与屏幕无关。
+ *
+ * 之所以要有这个常量而不是直接拿屏幕高度当上限：上限一旦取自当前屏幕，
+ * 旋转就会把用户设定的尺寸永久削掉一截，再也回不去。
+ */
+private val PANEL_INTENT_MAX = 1400.dp
+/** 展开 / 收起动画时长（毫秒）。再长会显得悬浮窗迟钝。 */
+private const val PANEL_ANIM_MS = 210
 /** 不小于这个尺寸时显示完整面板（标签切换 + 列表 / 文字转语音）。 */
 private val FULL_MIN_WIDTH = 260.dp
 private val FULL_MIN_HEIGHT = 300.dp
@@ -440,6 +505,7 @@ private fun PanelShell(
     maxWidth: Dp,
     maxHeight: Dp,
     panel: PanelSize,
+    appear: Float = 1f,
     scrollable: Boolean,
     dense: Boolean = false,
     onResizeEnd: () -> Unit,
@@ -457,29 +523,30 @@ private fun PanelShell(
     val density = LocalDensity.current
     val maxW = (maxWidth - PANEL_SHADOW_MARGIN * 2).coerceAtLeast(PANEL_MIN_WIDTH)
     val maxH = if (maxHeight == Dp.Infinity) null else (maxHeight - PANEL_SHADOW_MARGIN * 2).coerceAtLeast(PANEL_MIN_HEIGHT)
-    val width = (panel.width ?: EXPANDED_PANEL_WIDTH).coerceIn(PANEL_MIN_WIDTH, maxW)
-    val fixedHeight = panel.height?.let { h -> if (maxH != null) h.coerceIn(PANEL_MIN_HEIGHT, maxH) else h.coerceAtLeast(PANEL_MIN_HEIGHT) }
-        ?: if (dense && width >= FULL_MIN_WIDTH) maxH else null
+    // panel.width / panel.height 存的是**用户意图**，只受绝对上下限约束；屏幕给多大只影响渲染，
+    // 绝不回写意图。原来的写法在横屏拖动一次就把意图钳成横屏高度，转回竖屏再也长不回去，
+    // 音量行与选曲入口因此永久消失——这就是"横屏没法放大到初始大小"的根因。
+    val width = (panel.width ?: EXPANDED_PANEL_WIDTH).coerceIn(PANEL_MIN_WIDTH, minOf(PANEL_INTENT_MAX, maxW))
+    val intentHeight = panel.height
+    val fixedHeight = intentHeight?.let { h ->
+        if (maxH != null) h.coerceIn(PANEL_MIN_HEIGHT, maxH) else h.coerceAtLeast(PANEL_MIN_HEIGHT)
+    } ?: if (dense && width >= FULL_MIN_WIDTH) maxH else null
     var measuredHeight by remember { mutableStateOf(0.dp) }
-    // 档位依据用户主动设置的高度。旋转导致的屏幕限高不能把选曲入口隐藏。
+    // 档位同样依据意图高度：旋转带来的屏幕限高不该把选曲入口判成"用户想缩面板"
     val level = when {
-        width < MINI_MAX_WIDTH || (panel.height?.let { it < MINI_MAX_HEIGHT } == true) -> PanelLevel.MINI
-        width < FULL_MIN_WIDTH || (panel.height?.let { it < FULL_MIN_HEIGHT } == true) -> PanelLevel.COMPACT
+        width < MINI_MAX_WIDTH || (intentHeight?.let { it < MINI_MAX_HEIGHT } == true) -> PanelLevel.MINI
+        width < FULL_MIN_WIDTH || (intentHeight?.let { it < FULL_MIN_HEIGHT } == true) -> PanelLevel.COMPACT
         else -> PanelLevel.FULL
     }
 
     // 拖动手势用 pointerInput(Unit) 常驻，读取最新尺寸要经 rememberUpdatedState
-    val curWidth by rememberUpdatedState(width)
-    val curHeight by rememberUpdatedState(fixedHeight ?: measuredHeight)
-    val curMaxW by rememberUpdatedState(maxW)
-    val curMaxH by rememberUpdatedState(maxH)
+    // 这里读的是意图值（不是被屏幕钳过的渲染值），否则第二次拖动会从上一次的钳位结果继续算
+    val curWidth by rememberUpdatedState(panel.width ?: EXPANDED_PANEL_WIDTH)
+    val curHeight by rememberUpdatedState(intentHeight ?: (fixedHeight ?: measuredHeight))
 
     fun resizeBy(dx: Dp, dy: Dp) {
-        if (dx != 0.dp) panel.width = (curWidth + dx).coerceIn(PANEL_MIN_WIDTH, curMaxW)
-        if (dy != 0.dp) {
-            val h = curHeight + dy
-            panel.height = curMaxH?.let { h.coerceIn(PANEL_MIN_HEIGHT, it) } ?: h.coerceAtLeast(PANEL_MIN_HEIGHT)
-        }
+        if (dx != 0.dp) panel.width = (curWidth + dx).coerceIn(PANEL_MIN_WIDTH, PANEL_INTENT_MAX)
+        if (dy != 0.dp) panel.height = (curHeight + dy).coerceIn(PANEL_MIN_HEIGHT, PANEL_INTENT_MAX)
     }
 
     val latestResizeEnd by rememberUpdatedState(onResizeEnd)
@@ -501,7 +568,19 @@ private fun PanelShell(
     }
 
     // 投影画在外层边距里：窗口是 WRAP_CONTENT，投影外溢会被裁掉
-    Box(Modifier.padding(PANEL_SHADOW_MARGIN)) {
+    // 展开/收起动画作用在整块面板上：从下方轻微滑入 + 缩放淡入，与 HyperOS 面板的手感一致
+    val slidePx = with(density) { 12.dp.toPx() }
+    Box(
+        Modifier
+            .padding(PANEL_SHADOW_MARGIN)
+            .graphicsLayer {
+                alpha = appear
+                val s = 0.86f + 0.14f * appear
+                scaleX = s
+                scaleY = s
+                translationY = (1f - appear) * slidePx
+            }
+    ) {
         if (level == PanelLevel.MINI) {
             // 最小档：整块是播放键——轻点播放/继续，拖动移动位置，长按收起成悬浮球
             val boxHeight = fixedHeight ?: width
@@ -624,13 +703,28 @@ private fun CollapsePill(onClick: () -> Unit) {
 }
 
 @Composable
-private fun CircleIconButton(icon: ImageVector, desc: String, onClick: () -> Unit, iconOffset: Dp = 0.dp) {
+private fun CircleIconButton(
+    icon: ImageVector,
+    desc: String,
+    onClick: () -> Unit,
+    iconOffset: Dp = 0.dp,
+    /** 激活态用主色底 + 白图标，让"当前是开着的"一眼能看出来（麦克风 / 音乐注入按钮）。 */
+    active: Boolean = false,
+) {
     val t = glass
     Box(
-        Modifier.liquidClickable(pressed = 0.88f, onClick = onClick).size(34.dp).clip(CircleShape).background(t.fill),
+        Modifier
+            .liquidClickable(pressed = 0.88f, onClick = onClick)
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(if (active) t.primary else t.fill),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, desc, tint = t.ink, modifier = Modifier.padding(start = iconOffset).size(17.dp))
+        Icon(
+            icon, desc,
+            tint = if (active) Color.White else t.ink,
+            modifier = Modifier.padding(start = iconOffset).size(17.dp)
+        )
     }
 }
 
@@ -644,6 +738,7 @@ private fun Ball(
     sizeDp: Dp,
     iconPath: String?,
     opacity: Float,
+    appear: Float = 1f,
     streaming: Boolean,
     onTap: () -> Unit,
     onDragBy: (Float, Float) -> Unit,
@@ -668,8 +763,12 @@ private fun Ball(
         modifier = Modifier
             .padding(6.dp)
             .size(sizeDp)
-            .alpha(opacity.coerceIn(0.2f, 1f))
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .alpha(opacity.coerceIn(0.2f, 1f) * appear)
+            .graphicsLayer {
+                val s = scale * (0.88f + 0.12f * appear)
+                scaleX = s
+                scaleY = s
+            }
             .pointerInput(Unit) {
                 detectDragGestures(onDragEnd = { onDragEnd() }) { change, drag ->
                     change.consume()
@@ -738,7 +837,6 @@ private fun ColumnScope.LibraryTab(
     onSetPlaybackPolicy: (PlaybackPolicy) -> Unit,
 ) {
     val t = glass
-    var controlsExpanded by remember { mutableStateOf(false) }
     val playback: @Composable () -> Unit = {
         PlaybackRow(
             enabled = activeFile,
@@ -797,58 +895,63 @@ private fun ColumnScope.LibraryTab(
         playback()
         groupSelector()
     }
+    // 点一首歌 → 它升到列表最上面并就地展开（播放键 + 进度条 + 时长 + 播放策略 + 注入音量）。
+    // 取代原来那个"播放设置 / 收起设置"的折叠按钮：控制项跟着曲目走，横屏矮面板里也总能点到。
+    // 当前曲目置顶。Boolean 不是 Comparable，不能 compareByDescending；
+    // 用两段拼接做稳定排序，其余曲目保持原有顺序
+    val ordered = clips.filter { it.isCurrent } + clips.filterNot { it.isCurrent }
     LazyColumn(
         modifier = Modifier.weight(1f, fill = compactLayout || fixedHeight)
             .then(if (compactLayout || fixedHeight) Modifier else Modifier.heightIn(max = 264.dp)),
         verticalArrangement = Arrangement.spacedBy(LIBRARY_ITEM_GAP)
     ) {
-        if (compactLayout) {
-            // 控制区和分组也参与滚动：极矮屏、大字体或展开设置都不能挤掉歌曲。
-            item(key = "controls") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) { playback() }
-                    TextButton(onClick = { controlsExpanded = !controlsExpanded }) {
-                        Text(stringResource(if (controlsExpanded) R.string.float_hide_controls else R.string.float_show_controls))
-                    }
-                }
-            }
-            if (controlsExpanded) {
-                item(key = "volume") { VolumeRow(gain = outputGain, onSetGain = onSetOutputGain) }
-                item(key = "policy") { policySelector() }
-            }
-            if (groups.size > 1) item(key = "groups") { groupSelector() }
-        }
-        if (clips.isEmpty()) {
+        if (compactLayout && groups.size > 1) item(key = "groups") { groupSelector() }
+        if (ordered.isEmpty()) {
             item(key = "empty") { PanelEmpty(emptyMessage) }
         } else {
-            items(clips, key = { "clip:${it.id}" }) { c ->
-                Row(
+            items(ordered, key = { "clip:${it.id}" }) { c ->
+                val expanded = c.isCurrent
+                Column(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = LIBRARY_TOUCH_HEIGHT)
                         .clip(RoundedCornerShape(LIBRARY_ITEM_RADIUS))
-                        .background(if (c.isCurrent) t.primarySoft else Color.Transparent)
-                        .clickable { onSelectClip(c.id) }
-                        .padding(horizontal = LIBRARY_ITEM_PADDING, vertical = COMPACT_PANEL_GAP),
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(if (expanded) t.primarySoft else Color.Transparent)
+                        // 当前项已在顶部并展开，再点它不重复选（选同一条会打断正在播的进度）
+                        .clickable(enabled = !expanded) { onSelectClip(c.id) }
+                        .padding(
+                            horizontal = LIBRARY_ITEM_PADDING,
+                            vertical = if (expanded) COMPACT_PANEL_GAP else COMPACT_PANEL_GAP
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        c.name,
-                        fontSize = 14.sp,
-                        fontWeight = if (c.isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                        color = t.ink,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (c.durationMs > 0) {
-                        Spacer(Modifier.width(COMPACT_PANEL_GAP))
-                        Text(formatMs(c.durationMs), fontSize = 12.sp, color = t.ink3, fontFamily = MonoFamily)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (expanded) {
+                            Dot(t.primary, size = 7.dp)
+                            Spacer(Modifier.width(COMPACT_PANEL_GAP))
+                        }
+                        Text(
+                            c.name,
+                            fontSize = 14.sp,
+                            fontWeight = if (expanded) FontWeight.SemiBold else FontWeight.Normal,
+                            color = t.ink,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (c.durationMs > 0) {
+                            Spacer(Modifier.width(COMPACT_PANEL_GAP))
+                            Text(formatMs(c.durationMs), fontSize = 12.sp, color = t.ink3, fontFamily = MonoFamily)
+                        }
+                    }
+                    if (expanded) {
+                        playback()
+                        policySelector()
+                        if (compactLayout) VolumeRow(gain = outputGain, onSetGain = onSetOutputGain)
                     }
                 }
             }
         }
     }
-    if (!compactLayout) policySelector()
 }
 
 /** 播放头：播放/暂停 + 名称 + 进度 + 时间。音频库页与精简档面板共用；窄时隐藏时间。 */

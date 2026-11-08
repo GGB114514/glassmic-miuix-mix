@@ -459,6 +459,18 @@
     <string name="mix_state_error">采集异常</string>
     <string name="settings_perm_mic_granted">麦克风权限：已授予</string>
     <string name="settings_perm_mic_denied">麦克风权限：未授予（点击申请）</string>
+
+    <!-- 悬浮窗按钮 / 音乐注入解耦 -->
+    <string name="float_mic_button">麦克风</string>
+    <string name="float_music_inject_button">音乐注入</string>
+    <string name="settings_music_inject">音乐注入到麦克风</string>
+    <string name="settings_music_inject_hint">关闭后目标应用拿到的是真实麦克风，即使仍选着曲子、仍处于播放态；与播放键完全解耦</string>
+    <string name="settings_float_mic_button">悬浮窗麦克风按钮</string>
+    <string name="settings_float_mic_button_hint">决定悬浮窗上那枚麦克风按钮点下去做什么</string>
+    <string name="settings_float_mic_button_mix">开关混音</string>
+    <string name="settings_float_mic_button_real">切换真实麦克风</string>
+    <string name="home_mix_silent">系统限制了后台并发录音，已自动改由目标应用内混音</string>
+    <string name="mix_state_silent">被系统静音（已自动兜底）</string>
     <string name="home_brand">璃麦</string>
     <string name="home_toggle_master">切换虚拟麦克风</string>
     <string name="status_using_real_tap">当前使用真实麦克风 · 轻点开启</string>

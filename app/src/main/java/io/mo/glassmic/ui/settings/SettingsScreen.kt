@@ -356,6 +356,34 @@ fun SettingsScreen(
                     checked = cfg.micMix.enabled,
                     onChange = vm::setMixEnabled
                 )
+                // 与播放键解耦的总闸：关掉后目标应用拿到的是真实麦克风，
+                // 哪怕面板里仍选着曲子、哪怕处于播放态
+                ToggleRow(
+                    title = stringResource(R.string.settings_music_inject),
+                    subtitle = stringResource(R.string.settings_music_inject_hint),
+                    checked = if (cfg.hasMusicInject()) cfg.musicInject else true,
+                    onChange = vm::setMusicInject
+                )
+                // 悬浮窗麦克风按钮的语义，由用户定
+                StackedRow(
+                    stringResource(R.string.settings_float_mic_button),
+                    subtitle = stringResource(R.string.settings_float_mic_button_hint)
+                ) {
+                    Segmented(
+                        options = listOf(
+                            io.mo.glassmic.core.model.MixButtonAction.TOGGLE_MIX
+                                to stringResource(R.string.settings_float_mic_button_mix),
+                            io.mo.glassmic.core.model.MixButtonAction.TOGGLE_REAL_MIC
+                                to stringResource(R.string.settings_float_mic_button_real)
+                        ),
+                        selected = when (cfg.micMix.buttonAction) {
+                            io.mo.glassmic.proto.MixButtonAction.TOGGLE_REAL_MIC ->
+                                io.mo.glassmic.core.model.MixButtonAction.TOGGLE_REAL_MIC
+                            else -> io.mo.glassmic.core.model.MixButtonAction.TOGGLE_MIX
+                        },
+                        onSelect = vm::setMixButtonAction
+                    )
+                }
                 StackedRow(
                     stringResource(R.string.settings_mix_engine),
                     subtitle = stringResource(
@@ -425,6 +453,7 @@ fun SettingsScreen(
                                 MicCaptureMixer.CapState.NO_PERMISSION -> R.string.mix_state_no_permission
                                 MicCaptureMixer.CapState.DEVICE_BUSY -> R.string.mix_state_busy
                                 MicCaptureMixer.CapState.UNSUPPORTED -> R.string.mix_state_unsupported
+                                MicCaptureMixer.CapState.SILENT -> R.string.mix_state_silent
                                 MicCaptureMixer.CapState.ERROR -> R.string.mix_state_error
                                 else -> R.string.mix_state_idle
                             }

@@ -68,6 +68,15 @@ class MicCaptureMixer @Inject constructor(
         /** 设备不支持该采集参数，或 AudioRecord 初始化失败。 */
         UNSUPPORTED,
 
+        /**
+         * 采集线程活着、AudioRecord 也说自己在录，但拿到的全是静音。
+         *
+         * 这是 Android 10+ 并发录音限制的典型表现：目标应用正在录音时，
+         * 后台应用新起的录音会话会被系统喂 0。状态看着正常、实际听不到人声，
+         * 所以必须单独成为一档并驱动 HOOK_SIDE 兜底，而不是继续谎报「采集中」。
+         */
+        SILENT,
+
         /** 采集线程意外异常。 */
         ERROR
     }
@@ -177,32 +186,38 @@ class MicCaptureMixer @Inject constructor(
             return@withLock
         }
 
-        val rec = runCatching {
-            AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                // 4 倍最小缓冲：容忍一次调度抖动而不产生破音
-                minBuf * 4
-            )
-        }.getOrElse {
-            stopCapturing(CapState.ERROR, "mic_init_failed")
-            GlassLog.b("MicMix") { "AudioRecord 创建失败: ${it.message}" }
-            return@withLock
+        // 逐个试采集源：HyperOS / MIUI 等 ROM 对不同 source 的后台录音策略差别很大，
+        // 单一 VOICE_RECOGNITION 在部分机型上直接不给初始化或不给启动。
+        var opened: AudioRecord? = null
+        var openedSource = 0
+        for (src in CAPTURE_SOURCES) {
+            val candidate = runCatching {
+                AudioRecord(
+                    src,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    // 4 倍最小缓冲：容忍一次调度抖动而不产生破音
+                    minBuf * 4
+                )
+            }.getOrNull()
+            if (candidate == null || candidate.state != AudioRecord.STATE_INITIALIZED) {
+                runCatching { candidate?.release() }
+                continue
+            }
+            val started = runCatching { candidate.startRecording() }.isSuccess &&
+                candidate.recordingState == AudioRecord.RECORDSTATE_RECORDING
+            if (!started) {
+                runCatching { candidate.release() }
+                continue
+            }
+            opened = candidate
+            openedSource = src
+            break
         }
-        if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            runCatching { rec.release() }
-            stopCapturing(CapState.UNSUPPORTED, "mic_unsupported")
-            return@withLock
-        }
-
-        val started = runCatching { rec.startRecording() }.also {
-            if (it.isFailure) GlassLog.b("MicMix") { "startRecording 失败: ${it.exceptionOrNull()?.message}" }
-        }.isSuccess
-        if (!started || rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            runCatching { rec.release() }
-            // 启动失败最常见的就是麦克风被通话/其它 App 独占
+        val rec = opened
+        if (rec == null) {
+            // 全部采集源都起不来：最常见的就是麦克风被通话 / 其它应用独占
             stopCapturing(CapState.DEVICE_BUSY, "mic_busy")
             return@withLock
         }
@@ -214,6 +229,8 @@ class MicCaptureMixer @Inject constructor(
         val t = Thread({
             var readErrors = 0
             var latencyGuard = 0
+            // 最近一次拿到非零采样的时刻；持续为 0 就说明系统没给我们真声音。
+            var lastRealAudioAt = System.currentTimeMillis()
             while (!stopRequested) {
                 val n = runCatching { rec.read(chunk, 0, chunk.size) }.getOrDefault(-1)
                 if (n <= 0) {
@@ -230,6 +247,15 @@ class MicCaptureMixer @Inject constructor(
                     continue
                 }
                 readErrors = 0
+                // 静音看门狗：只有「整段采样精确为 0」才判定被系统静音。
+                // 真人不说话时房间里仍有底噪与量化抖动，几乎不会连续几秒给出全 0；
+                // 反过来，Android 10+ 并发录音限制给后台录音者喂的正是全 0。
+                var peak = 0
+                for (k in 0 until n) {
+                    val a = if (chunk[k] < 0) -chunk[k] else chunk[k]
+                    if (a > peak) peak = a
+                }
+                if (peak > 0) lastRealAudioAt = System.currentTimeMillis()
                 ring.write(chunk, 0, n)
                 // 采集快于消费说明目标侧没在取流，丢掉最新一段把延迟压回 250ms 以内，
                 // 否则一恢复播放就会把积压的旧声音一起糊上去。
@@ -237,6 +263,19 @@ class MicCaptureMixer @Inject constructor(
                     latencyGuard = 0
                     val backlog = ring.size()
                     if (backlog > MAX_BACKLOG_SAMPLES) ring.dropNewest(backlog - MAX_BACKLOG_SAMPLES)
+                    val silentMs = System.currentTimeMillis() - lastRealAudioAt
+                    if (silentMs > SILENCE_WINDOW_MS && _capState.value == CapState.RUNNING) {
+                        // 状态改档但不拆线程：目标应用一释放麦克风，这里会自己回到 RUNNING
+                        _capState.value = CapState.SILENT
+                        _notice.value = "mic_silence"
+                        runtime.setMicMixing(active = false, notice = "mic_silence")
+                        GlassLog.b("MicMix") { "连续 ${silentMs}ms 采样全为 0，判定麦克风被系统静音，改由 HOOK_SIDE 兜底" }
+                    } else if (silentMs <= SILENCE_WINDOW_MS && _capState.value == CapState.SILENT) {
+                        _capState.value = CapState.RUNNING
+                        _notice.value = null
+                        runtime.setMicMixing(active = true, notice = null)
+                        GlassLog.b("MicMix") { "非零采样恢复，应用侧混音重新可用" }
+                    }
                 }
             }
             runCatching {
@@ -252,8 +291,24 @@ class MicCaptureMixer @Inject constructor(
         _capState.value = CapState.RUNNING
         _notice.value = null
         runtime.setMicMixing(active = true, notice = null)
-        GlassLog.b("MicMix") { "应用侧采集已启动 @48kHz mono" }
+        GlassLog.b("MicMix") { "应用侧采集已启动 @48kHz mono，采集源=${sourceName(openedSource)}" }
         t.start()
+    }
+
+    /**
+     * 应用侧混音此刻是否真的可用——即线程在跑且采到了非零声音。
+     *
+     * [RuntimeProvider] 据此决定是否让注入进程改用 HOOK_SIDE 兜底：
+     * 系统把我们的后台录音喂成静音时，借用目标应用自己的录音会话是唯一还能拿到人声的办法。
+     */
+    val appSideUsable: Boolean get() = _capState.value == CapState.RUNNING
+
+    private fun sourceName(src: Int): String = when (src) {
+        MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
+        MediaRecorder.AudioSource.MIC -> "MIC"
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+        MediaRecorder.AudioSource.CAMCORDER -> "CAMCORDER"
+        else -> "source#$src"
     }
 
     private fun stopCapturing(state: CapState, notice: String?) {
@@ -375,6 +430,22 @@ class MicCaptureMixer @Inject constructor(
 
         /** 允许的最大积压样本数（250ms @48kHz）。 */
         const val MAX_BACKLOG_SAMPLES = 12_000
+
+        /**
+         * 依次尝试的采集源，第一个能初始化并启动的胜出。
+         *
+         * 各 ROM 对后台录音的白名单不一样：有的只放行 VOICE_RECOGNITION，
+         * 有的反而只给 MIC 或 CAMCORDER。多试一轮比猜某一个靠谱得多。
+         */
+        val CAPTURE_SOURCES = intArrayOf(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            MediaRecorder.AudioSource.CAMCORDER
+        )
+
+        /** 连续多久拿不到任何非零采样就判定「被系统静音」。 */
+        const val SILENCE_WINDOW_MS = 4_000L
     }
 }
 

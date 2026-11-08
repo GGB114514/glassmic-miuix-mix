@@ -69,6 +69,16 @@ message MicMix {
   float music_gain = 3;  // 0..1，0 视为 1.0——注入音乐的比重
   float mic_gain = 4;    // 0..1，0 视为 1.0——真人麦克风的比重
   bool ducking = 5;      // 检测到说话时自动压低音乐
+  // 悬浮窗麦克风按钮的行为（用户可在设置里改）
+  MixButtonAction button_action = 6;
+}
+
+// 悬浮窗上那枚麦克风按钮点下去做什么。
+enum MixButtonAction {
+  // 开 / 关混音：在「音乐顶替麦克风」和「音乐 + 人声」之间切换。
+  TOGGLE_MIX = 0;
+  // 真实麦克风 / 音乐注入：在「完全放行真实麦克风」和「恢复当前音源」之间切换。
+  TOGGLE_REAL_MIC = 1;
 }
 
 // 混音实现层。两者都能达到「边放音乐边说话」，差别在真实麦克风从哪里取。

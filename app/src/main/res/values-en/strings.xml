@@ -459,6 +459,18 @@
     <string name="mix_state_error">Capture error</string>
     <string name="settings_perm_mic_granted">Microphone: granted</string>
     <string name="settings_perm_mic_denied">Microphone: not granted (tap to request)</string>
+
+    <!-- Floating buttons / decoupled music injection -->
+    <string name="float_mic_button">Microphone</string>
+    <string name="float_music_inject_button">Music injection</string>
+    <string name="settings_music_inject">Inject music into the microphone</string>
+    <string name="settings_music_inject_hint">When off, target apps receive the real microphone even if a track is selected and playing; fully independent of the play button</string>
+    <string name="settings_float_mic_button">Floating microphone button</string>
+    <string name="settings_float_mic_button_hint">Choose what the microphone button in the floating panel does</string>
+    <string name="settings_float_mic_button_mix">Toggle mixing</string>
+    <string name="settings_float_mic_button_real">Toggle real microphone</string>
+    <string name="home_mix_silent">Concurrent capture is blocked by the system; mixing moved inside the target app</string>
+    <string name="mix_state_silent">Silenced by system (auto fallback)</string>
     <string name="home_brand">GlassMic</string>
     <string name="home_toggle_master">Toggle virtual microphone</string>
     <string name="status_using_real_tap">Using the real microphone · tap to enable</string>

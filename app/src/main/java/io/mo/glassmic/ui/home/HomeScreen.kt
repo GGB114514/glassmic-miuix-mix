@@ -541,6 +541,7 @@ private fun MicModeCard(
                 // 采集状态直读：mic_busy / mic_unsupported 都是真实降级，不能装作在混音
                 val hint = when (notice) {
                     "mic_permission" -> R.string.home_mix_need_permission
+                    "mic_silence" -> R.string.home_mix_silent
                     "mic_busy", "mic_interrupted" -> R.string.home_mix_busy
                     "mic_unsupported" -> R.string.home_mix_unsupported
                     "mic_init_failed" -> R.string.home_mix_error

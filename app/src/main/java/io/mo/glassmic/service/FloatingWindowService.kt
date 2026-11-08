@@ -37,6 +37,7 @@ import io.mo.glassmic.data.runtime.VolumeShortcutRepository
 import io.mo.glassmic.log.GlassLog
 import io.mo.glassmic.proto.AppConfig
 import io.mo.glassmic.proto.FloatingSize
+import io.mo.glassmic.proto.MixButtonAction
 import io.mo.glassmic.proto.TtsAiConfig
 import io.mo.glassmic.proto.TtsProvider
 import io.mo.glassmic.audio.tts.FishVoices
@@ -112,6 +113,10 @@ class FloatingWindowService : LifecycleService() {
         super.onConfigurationChanged(newConfig)
         refreshOverlayBounds()
         host?.view?.requestApplyInsets()
+        // 旋转后窗口坐标还停在旧位置上：展开面板比横屏可用高度高时，
+        // 底边（含右下角调整大小的握把）会整块掉到屏幕外，用户完全抓不到手柄。
+        // 等 Compose 按新边界重新测量完，再按真实尺寸夹一次。
+        host?.view?.postDelayed({ clampToBounds() }, ROTATION_CLAMP_DELAY_MS)
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -260,7 +265,32 @@ class FloatingWindowService : LifecycleService() {
                 val currentName = if (rt.currentSourceType == SourceType.TTS) stringResource(R.string.source_tts)
                                   else allClips.firstOrNull { it.id == currentId }?.displayName
 
+                // 音乐注入开关（与播放/暂停解耦）。未设置过按开启处理，与 proto 的 optional 语义一致。
+                val musicInjectOn = if (cfg.hasMusicInject()) cfg.musicInject else true
+                // 麦克风按钮的高亮语义跟着用户选的行为走：
+                // 开关混音 → 亮表示混音生效；切换真实麦克风 → 亮表示此刻麦克风归真人
+                val micButtonAction = cfg.micMix.buttonAction
+                val micActive = when (micButtonAction) {
+                    MixButtonAction.TOGGLE_REAL_MIC -> rt.currentSourceType == SourceType.REAL_MIC
+                    else -> cfg.micMix.enabled
+                }
+                val onMicButton: () -> Unit = {
+                    lifecycleScope.launch {
+                        when (micButtonAction) {
+                            MixButtonAction.TOGGLE_REAL_MIC -> playback.toggleRealMicFromFloat()
+                            else -> playback.toggleMixFromFloat()
+                        }
+                    }
+                }
+                val onMusicInjectButton: () -> Unit = {
+                    lifecycleScope.launch { playback.toggleMusicInject() }
+                }
+
                 FloatingBubbleRoot(
+                    micButtonActive = micActive,
+                    onMicButton = onMicButton,
+                    musicInjectEnabled = musicInjectOn,
+                    onMusicInjectButton = onMusicInjectButton,
                     playbackPolicy = cfg.playbackPolicy,
                     onSetPlaybackPolicy = { policy ->
                         lifecycleScope.launch { configStore.update { it.setPlaybackPolicy(policy) } }
@@ -567,6 +597,9 @@ class FloatingWindowService : LifecycleService() {
 
         /** 自定义延时上限 60s：再长就该用别的方式了，也避免误输入把语音永远压住。 */
         const val MAX_TTS_DELAY_MS = 60_000
+
+        /** 旋转后等 Compose 按新边界测量完再夹位置的时间窗（毫秒）。 */
+        private const val ROTATION_CLAMP_DELAY_MS = 320L
 
         fun start(ctx: Context) {
             if (!Settings.canDrawOverlays(ctx)) return

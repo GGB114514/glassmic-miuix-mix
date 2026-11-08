@@ -40,5 +40,8 @@ data class ConfigSnapshot(
     val mixEngine: MixEngine = MixEngine.APP_SIDE,
     val musicGain: Float = 1f,
     val micGain: Float = 1f,
-    val mixDucking: Boolean = false
+    val mixDucking: Boolean = false,
+    /** 音乐注入总开关。false 时目标应用直接走真实麦克风，与播放/暂停无关。 */
+    val musicInjectEnabled: Boolean = true,
+    val mixButtonAction: MixButtonAction = MixButtonAction.TOGGLE_MIX
 )

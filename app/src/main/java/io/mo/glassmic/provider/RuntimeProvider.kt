@@ -35,6 +35,7 @@ class RuntimeProvider : ContentProvider() {
     @InstallIn(SingletonComponent::class)
     interface RuntimeEntryPoint {
         fun resolver(): EffectiveSourceResolver
+        fun micMixer(): io.mo.glassmic.audio.MicCaptureMixer
     }
 
     override fun onCreate(): Boolean = true
@@ -52,8 +53,14 @@ class RuntimeProvider : ContentProvider() {
         val snap = resolver.configSnapshot()
         // 混音：HOOK_SIDE 引擎需要在目标进程里决定「先取真实麦克风再叠加注入流」，
         // 所以把混音开关与电平随同 source 一起下发，避免注入进程再发一次 Binder 查询。
-        // APP_SIDE 引擎下 mix 一律为 0——混音已经在本进程的 PCM 管道里做完了。
-        val hookMix = snap.mixEnabled && snap.mixEngine == MixEngine.HOOK_SIDE && src != SourceType.REAL_MIC
+        //
+        // 自动兜底：用户选的是 APP_SIDE，但本进程此刻并没有真的采到声音（并发录音被系统限制、
+        // 麦克风被独占、无权限）时，改由注入进程借用目标应用自己的录音会话来出人声。
+        // 两栖都不会同时生效——APP_SIDE 可用时 hookMix 为 0，本进程 mixInto 才动手，
+        // 反之亦然，绝不会把人声叠两遍。
+        val appSideUsable = runCatching { entryPoint().micMixer().appSideUsable }.getOrDefault(true)
+        val hookMix = snap.mixEnabled && src != SourceType.REAL_MIC &&
+            (snap.mixEngine == MixEngine.HOOK_SIDE || !appSideUsable)
         return MatrixCursor(
             arrayOf(
                 "source", "group_id", "audio_id", "global_switch",

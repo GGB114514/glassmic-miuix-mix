@@ -77,6 +77,12 @@ class EffectiveSourceResolver @Inject constructor(
         if (!rt.enabled) {
             return Triple(SourceType.REAL_MIC, "SERVICE_DISABLED", "运行态/前台服务未启动 (Service disabled)")
         }
+        // 7.5 音乐注入总开关：关掉之后完全不碰目标应用的麦克风。
+        // 刻意与「播放/暂停」解耦——暂停只是不出声，注入关才是把麦克风还给真人，
+        // 这样不播放音乐时麦克风照常可用（需求明确要求拆开）。
+        if (!snap.musicInjectEnabled) {
+            return Triple(SourceType.REAL_MIC, "MUSIC_INJECT_OFF", "音乐注入已关闭 (Music injection off)")
+        }
         // 8. 当前运行态决定的音源
         val eff = when (rt.currentSourceType) {
             SourceType.TTS -> SourceType.FILE

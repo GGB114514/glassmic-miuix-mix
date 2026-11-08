@@ -133,6 +133,32 @@ object AudioRecordHook {
         if (!validRange(buf.size, offset, size)) return HookDecision.Proceed
 
         val record = chain.getThisObject() as AudioRecord
+        // ===== HOOK_SIDE 混音：先取真实麦克风，再叠加注入流 =====
+        //
+        // 这段必须排在 SILENCE 分支**之前**。音乐暂停时 resolve() 返回的就是 SILENCE，
+        // 若先走舒适噪声分支就 return 了，混音在暂停态永远不可能生效——
+        // 这正是"混音看着开了却没声音"的直接原因。
+        val mix = XBridge.mix()
+        if (mix.enabled) {
+            val isFloat = record.audioFormat == AudioFormat.ENCODING_PCM_FLOAT
+            val real = (chain.proceed() as? Int) ?: -1
+            if (real > 0) {
+                if (src != SourceType.SILENCE) {
+                    val reader = obtainReader(appCtx, record)
+                    val inj = ByteArray(real)
+                    val got = if (isFloat) reader.readFloatBytes(inj, 0, real) else reader.read(inj, 0, real)
+                    if (got > 0) {
+                        if (isFloat) MixPcm.addFloatBytes(buf, offset, real, inj, got, mix)
+                        else MixPcm.addPcm16(buf, offset, real, inj, got, mix)
+                    }
+                }
+                // src == SILENCE（音乐暂停）时直接把人声原样交回去，一个字节都不覆盖
+                accumulate(appCtx, pkg, real, record.sampleRate, record.channelCount)
+                return HookDecision.Replace(real)
+            }
+            // proceed() 拿不到数据（录音未开始 / 出错）时退回下面的注入路径
+        }
+
         if (src == SourceType.SILENCE) {
             // 注入舒适噪声而非纯 0，避免下游 App 把静音判定为"无输入"而中断录音
             val isFloat = record.audioFormat == AudioFormat.ENCODING_PCM_FLOAT
@@ -142,25 +168,6 @@ object AudioRecordHook {
             paceSilence(size / bytesPerFrame, record.sampleRate)
             accumulate(appCtx, pkg, size, record.sampleRate, record.channelCount)
             return HookDecision.Replace(size)
-        }
-
-        // ===== HOOK_SIDE 混音：先取真实麦克风，再叠加注入流 =====
-        val mix = XBridge.mix()
-        if (mix.enabled) {
-            val isFloat = record.audioFormat == AudioFormat.ENCODING_PCM_FLOAT
-            val real = (chain.proceed() as? Int) ?: -1
-            if (real > 0) {
-                val reader = obtainReader(appCtx, record)
-                val inj = ByteArray(real)
-                val got = if (isFloat) reader.readFloatBytes(inj, 0, real) else reader.read(inj, 0, real)
-                if (got > 0) {
-                    if (isFloat) MixPcm.addFloatBytes(buf, offset, real, inj, got, mix)
-                    else MixPcm.addPcm16(buf, offset, real, inj, got, mix)
-                }
-                accumulate(appCtx, pkg, real, record.sampleRate, record.channelCount)
-                return HookDecision.Replace(real)
-            }
-            // proceed() 拿不到数据（录音未开始 / 出错）时退回纯注入，不至于给出空缓冲区
         }
 
         val reader = obtainReader(appCtx, record)
@@ -185,25 +192,27 @@ object AudioRecordHook {
         if (!validRange(buf.size, offset, sizeInShorts)) return HookDecision.Proceed
 
         val record = chain.getThisObject() as AudioRecord
+        // ===== HOOK_SIDE 混音（必须早于 SILENCE 分支，理由见 handleByteArray）=====
+        val mix = XBridge.mix()
+        if (mix.enabled) {
+            val real = (chain.proceed() as? Int) ?: -1
+            if (real > 0) {
+                if (src != SourceType.SILENCE) {
+                    val reader = obtainReader(appCtx, record)
+                    val inj = ByteArray(real * 2)
+                    val got = reader.read(inj, 0, inj.size)
+                    if (got > 0) MixPcm.addPcm16Shorts(buf, offset, real, inj, got, mix)
+                }
+                accumulate(appCtx, pkg, real * 2, record.sampleRate, record.channelCount)
+                return HookDecision.Replace(real)
+            }
+        }
+
         if (src == SourceType.SILENCE) {
             ComfortNoise.fillShorts(buf, offset, sizeInShorts)
             paceSilence(sizeInShorts / record.channelCount.coerceAtLeast(1), record.sampleRate)
             accumulate(appCtx, pkg, sizeInShorts * 2, record.sampleRate, record.channelCount)
             return HookDecision.Replace(sizeInShorts)
-        }
-
-        // ===== HOOK_SIDE 混音 =====
-        val mix = XBridge.mix()
-        if (mix.enabled) {
-            val real = (chain.proceed() as? Int) ?: -1
-            if (real > 0) {
-                val reader = obtainReader(appCtx, record)
-                val inj = ByteArray(real * 2)
-                val got = reader.read(inj, 0, inj.size)
-                if (got > 0) MixPcm.addPcm16Shorts(buf, offset, real, inj, got, mix)
-                accumulate(appCtx, pkg, real * 2, record.sampleRate, record.channelCount)
-                return HookDecision.Replace(real)
-            }
         }
 
         val reader = obtainReader(appCtx, record)
@@ -230,25 +239,27 @@ object AudioRecordHook {
         if (!validRange(buf.size, offset, sizeInFloats)) return HookDecision.Proceed
 
         val record = chain.getThisObject() as AudioRecord
+        // ===== HOOK_SIDE 混音（必须早于 SILENCE 分支，理由见 handleByteArray）=====
+        val mix = XBridge.mix()
+        if (mix.enabled) {
+            val real = (chain.proceed() as? Int) ?: -1
+            if (real > 0) {
+                if (src != SourceType.SILENCE) {
+                    val reader = obtainReader(appCtx, record)
+                    val inj = ByteArray(real * 2)
+                    val got = reader.read(inj, 0, inj.size)
+                    if (got > 0) MixPcm.addFloats(buf, offset, real, inj, got, mix)
+                }
+                accumulate(appCtx, pkg, real * 4, record.sampleRate, record.channelCount)
+                return HookDecision.Replace(real)
+            }
+        }
+
         if (src == SourceType.SILENCE) {
             ComfortNoise.fillFloats(buf, offset, sizeInFloats)
             paceSilence(sizeInFloats / record.channelCount.coerceAtLeast(1), record.sampleRate)
             accumulate(appCtx, pkg, sizeInFloats * 4, record.sampleRate, record.channelCount)
             return HookDecision.Replace(sizeInFloats)
-        }
-
-        // ===== HOOK_SIDE 混音 =====
-        val mix = XBridge.mix()
-        if (mix.enabled) {
-            val real = (chain.proceed() as? Int) ?: -1
-            if (real > 0) {
-                val reader = obtainReader(appCtx, record)
-                val inj = ByteArray(real * 2)
-                val got = reader.read(inj, 0, inj.size)
-                if (got > 0) MixPcm.addFloats(buf, offset, real, inj, got, mix)
-                accumulate(appCtx, pkg, real * 4, record.sampleRate, record.channelCount)
-                return HookDecision.Replace(real)
-            }
         }
 
         val reader = obtainReader(appCtx, record)
@@ -287,15 +298,18 @@ object AudioRecordHook {
         }
 
         // ===== HOOK_SIDE 混音：ByteBuffer 用绝对下标，避免动 position =====
+        // 同样必须早于 SILENCE 分支——暂停态下 src 就是 SILENCE。
         val mix = XBridge.mix()
         if (mix.enabled) {
             val real = (chain.proceed() as? Int) ?: -1
             if (real > 0) {
-                val reader = obtainReader(appCtx, record)
-                val isFloat = record.audioFormat == AudioFormat.ENCODING_PCM_FLOAT
-                val inj = ByteArray(real)
-                val got = if (isFloat) reader.readFloatBytes(inj, 0, real) else reader.read(inj, 0, real)
-                if (got > 0) MixPcm.addPcm16Buffer(buf, pos, real, inj, got, mix, isFloat)
+                if (src != SourceType.SILENCE) {
+                    val reader = obtainReader(appCtx, record)
+                    val isFloat = record.audioFormat == AudioFormat.ENCODING_PCM_FLOAT
+                    val inj = ByteArray(real)
+                    val got = if (isFloat) reader.readFloatBytes(inj, 0, real) else reader.read(inj, 0, real)
+                    if (got > 0) MixPcm.addPcm16Buffer(buf, pos, real, inj, got, mix, isFloat)
+                }
                 buf.position(pos + real)
                 accumulate(appCtx, pkg, real, record.sampleRate, record.channelCount)
                 return HookDecision.Replace(real)

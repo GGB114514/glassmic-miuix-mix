@@ -19,6 +19,12 @@ enum class MixEngine { APP_SIDE, HOOK_SIDE }
 /** 主页三态：纯音乐注入 / 音乐+麦克风混音 / 纯真实麦克风。 */
 enum class MicMixMode { MUSIC_ONLY, MIX, MIC_ONLY }
 
+/**
+ * 悬浮窗麦克风按钮的行为。由用户在设置里选定，悬浮窗只负责执行——
+ * 同一枚按钮在不同人手里想要的语义不一样，不该由我们单方面决定。
+ */
+enum class MixButtonAction { TOGGLE_MIX, TOGGLE_REAL_MIC }
+
 enum class ThemeMode { FOLLOW_SYSTEM, LIGHT, DARK }
 
 enum class FloatingMode { PILL, PANEL }

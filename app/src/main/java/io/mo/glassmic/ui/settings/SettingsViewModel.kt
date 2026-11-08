@@ -302,6 +302,25 @@ class SettingsViewModel @Inject constructor(
         configStore.update { it.setMicMix(it.micMix.toBuilder().setDucking(enabled).build()) }
     }
 
+    /**
+     * 悬浮窗那枚麦克风按钮的行为。
+     * 同一枚按钮，有人想用来开关混音，有人想用来在真人麦克风和音乐注入之间整块切换，
+     * 所以做成可配置的——语义由用户决定，不由我们猜。
+     */
+    fun setMixButtonAction(action: io.mo.glassmic.core.model.MixButtonAction) = viewModelScope.launch {
+        val proto = when (action) {
+            io.mo.glassmic.core.model.MixButtonAction.TOGGLE_REAL_MIC ->
+                io.mo.glassmic.proto.MixButtonAction.TOGGLE_REAL_MIC
+            else -> io.mo.glassmic.proto.MixButtonAction.TOGGLE_MIX
+        }
+        configStore.update { it.setMicMix(it.micMix.toBuilder().setButtonAction(proto).build()) }
+    }
+
+    /** 音乐注入开关（与播放/暂停解耦）。 */
+    fun setMusicInject(enabled: Boolean) = viewModelScope.launch {
+        configStore.update { it.setMusicInject(enabled) }
+    }
+
     /** 授权状态变化后刷新采集器。 */
     fun refreshMicCapture() {
         micMixer.refresh()

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -216,11 +217,20 @@ class HomeViewModel @Inject constructor(
     // ============ 三态与麦克风混音 ============
 
     /** 三态切换被挡下的原因——UI 据此决定是弹授权框还是引导选曲。 */
-    enum class MixReject { NONE, NO_PERMISSION, NO_CLIP }
+    enum class MixReject { NONE, NO_PERMISSION, NO_CLIP, NEED_PERMISSION }
 
     private val _mixReject = MutableStateFlow(MixReject.NONE)
     val mixReject: StateFlow<MixReject> = _mixReject.asStateFlow()
     fun consumeMixReject() { _mixReject.value = MixReject.NONE }
+
+    /** 音乐注入开关的当前状态（未设置按开启处理，与 proto 的 optional 语义一致）。 */
+    val musicInject: StateFlow<Boolean> = configStore.flow
+        .map { if (it.hasMusicInject()) it.musicInject else true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun toggleMusicInject() {
+        viewModelScope.launch { playback.toggleMusicInject() }
+    }
 
     /** 应用侧采集是否在跑。HOOK_SIDE 引擎下恒为 IDLE，那是预期状态而不是故障。 */
     val micCapState: StateFlow<MicCaptureMixer.CapState> get() = playback.micCapState
@@ -238,14 +248,20 @@ class HomeViewModel @Inject constructor(
      */
     fun setMixMode(mode: MicMixMode, onNeedPermission: () -> Unit = {}) {
         viewModelScope.launch {
-            if (mode == MicMixMode.MIX && !micGrantedNow()) {
-                mixPendingAfterGrant = true
-                _mixReject.value = MixReject.NO_PERMISSION
-                onNeedPermission()
+            val ok = playback.setMicMixMode(mode)
+            if (!ok) {
+                _mixReject.value = MixReject.NO_CLIP
                 return@launch
             }
-            val ok = playback.setMicMixMode(mode)
-            _mixReject.value = if (ok) MixReject.NONE else MixReject.NO_CLIP
+            // 混音不再被权限卡住：没授权时会自动走 HOOK_SIDE（借用目标应用已授权的录音会话）。
+            // 这里只是顺手邀请授权，好让应用侧采集那条路也能用——拒绝也完全不影响混音。
+            if (mode == MicMixMode.MIX && !micGrantedNow()) {
+                mixPendingAfterGrant = true
+                _mixReject.value = MixReject.NEED_PERMISSION
+                onNeedPermission()
+            } else {
+                _mixReject.value = MixReject.NONE
+            }
         }
     }
 
