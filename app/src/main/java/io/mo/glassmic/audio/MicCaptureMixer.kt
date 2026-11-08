@@ -252,7 +252,9 @@ class MicCaptureMixer @Inject constructor(
                 // 反过来，Android 10+ 并发录音限制给后台录音者喂的正是全 0。
                 var peak = 0
                 for (k in 0 until n) {
-                    val a = if (chunk[k] < 0) -chunk[k] else chunk[k]
+                    // 先 toInt 再 abs：Short 取反结果仍是 Short，与 Int 分支混用会被推成
+                    // Number & Comparable<*>，比较和赋值都编译不过（Actions 实测报的错）
+                    val a = kotlin.math.abs(chunk[k].toInt())
                     if (a > peak) peak = a
                 }
                 if (peak > 0) lastRealAudioAt = System.currentTimeMillis()

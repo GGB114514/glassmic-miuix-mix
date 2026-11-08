@@ -523,10 +523,13 @@ private fun MicModeCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         stringResource(
-                            if (reject == HomeViewModel.MixReject.NO_PERMISSION)
-                                R.string.home_mix_need_permission else R.string.home_mix_need_permission
+                            when (reject) {
+                                HomeViewModel.MixReject.NO_PERMISSION -> R.string.home_mix_need_permission
+                                else -> R.string.home_mix_hook_engine
+                            }
                         ),
-                        fontSize = 13.sp, color = t.err, modifier = Modifier.weight(1f)
+                        // 混音在没授权时也能工作（借用目标应用会话），所以是提醒而不是报错
+                        fontSize = 13.sp, color = t.warn, modifier = Modifier.weight(1f)
                     )
                     PrimaryButton(
                         text = stringResource(

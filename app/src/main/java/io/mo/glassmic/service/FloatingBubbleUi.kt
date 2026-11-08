@@ -892,7 +892,8 @@ private fun ColumnScope.LibraryTab(
     )
 
     if (!compactLayout) {
-        playback()
+        // 播放键与进度条现在跟着展开的曲目走；顶部只留分组入口，
+        // 否则完整档会出现两个播放头（一个在列表外、一个在展开卡片里）
         groupSelector()
     }
     // 点一首歌 → 它升到列表最上面并就地展开（播放键 + 进度条 + 时长 + 播放策略 + 注入音量）。
